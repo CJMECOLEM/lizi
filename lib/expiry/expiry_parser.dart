@@ -97,6 +97,7 @@ final _compactYmd = RegExp(r'(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)');
 final _dmy = RegExp(r'(?<!\d)(\d{1,2})[.\-/](\d{1,2})[.\-/](20\d{2})(?!\d)');
 final _shortYmd = RegExp(r'(?<![\d.\-/])(\d{2})[.\-/](\d{2})[.\-/](\d{2})(?![\d.\-/])');
 final _ym = RegExp(r'(?<!\d)(20\d{2})(?:\s?[.\-/]\s?|\s?年\s?)(\d{1,2})(?:\s?月)?(?![\d.\-/月])');
+final _my = RegExp(r'(?<![\d.\-/])(\d{1,2})[.\-/](20\d{2})(?![\d.\-/])');
 final _compactShort = RegExp(r'^(\d{2})(\d{2})(\d{2})(?!\d)');
 
 DateTime? _validDate(int y, int m, int d, DateTime now) {
@@ -125,10 +126,15 @@ List<_DateHit> _findDates(String text, DateTime now) {
     return a > 12 || b <= 12 ? _validDate(y, b, a, now) : _validDate(y, a, b, now);
   });
   add(_shortYmd, (m) {
-    final d = _validDate(2000 + g(m, 1), g(m, 2), g(m, 3), now);
-    return d != null && (d.year - now.year).abs() <= 10 ? d : null;
+    bool near(DateTime? d) => d != null && (d.year - now.year).abs() <= 10;
+    // Chinese packages print YY.MM.DD; imported ones often DD.MM.YY.
+    final ymd = _validDate(2000 + g(m, 1), g(m, 2), g(m, 3), now);
+    if (near(ymd)) return ymd;
+    final dmy = _validDate(2000 + g(m, 3), g(m, 2), g(m, 1), now);
+    return near(dmy) ? dmy : null;
   });
   add(_ym, (m) => _validDate(g(m, 1), g(m, 2), 1, now), monthOnly: true);
+  add(_my, (m) => _validDate(g(m, 2), g(m, 1), 1, now), monthOnly: true);
   hits.sort((a, b) => a.start.compareTo(b.start));
   return hits;
 }
@@ -177,6 +183,8 @@ ShelfLife? _shelfLifeOf(RegExpMatch m) {
   return n > max ? null : ShelfLife(n, unit);
 }
 
+final _beforeMarker = RegExp(r'^\s?(?:之前|以前|前|止)');
+
 final _afterOpening = RegExp(r'(?<![未不])(开封|開封|开启|開啟|打开|开瓶|开袋|开盖)[^\n]{0,8}$');
 
 // ---- Labels ----
@@ -184,8 +192,10 @@ final _afterOpening = RegExp(r'(?<![未不])(开封|開封|开启|開啟|打开|
 enum _LabelKind { production, expiry, generic }
 
 final _labels = RegExp(
-  '(?<exp>有效期至|有效期截至|有效期到|保质期至|保質期至|保质期到|有效日期|失效日期|到期日期|到期日|限用日期|截止日期|限期使用日期|使用期限至|保存期限至|'
-  '賞味期限|消費期限|(?<![A-Za-z])(?:EXP(?:IRY|IRATION)?\\.?\\s?(?:DATE)?|BBE|BB|BEST\\s?BEFORE(?:\\s?END)?|USE\\s?BY)(?![A-Za-z]))'
+  '(?<exp>有效期截止日期|有效期截止|有效期截至|有效期至|有效期到|保质期截止|保质期截至|保质期到期日|保质期至|保質期至|保质期到|'
+  '有效日期|失效日期|失效期|到期日期|到期时间|到期日|限用日期|截止使用日期|截止日期|限期使用日期|使用期限至|使用期限|保存期限至|'
+  '最佳食用日期|最佳食用期|最佳赏味期|赏味期限|賞味期限|消費期限|消费期限|'
+  '(?<![A-Za-z])(?:EXPIR(?:Y|ES|ATION)(?:\\s?DATE)?|EXP\\.?\\s?(?:DATE)?|BBE|BBD|BB|BEST\\s?BEFORE(?:\\s?END)?|BEST\\s?BY|USE\\s?BEFORE|USE\\s?BY)(?![A-Za-z]))'
   '|(?<prod>生产日期|生產日期|制造日期|製造日期|製造年月日|生产时间|出厂日期|灌装日期|包装日期|加工日期|生产批号|'
   '生产(?![商者许厂地址企单])|製造(?![商者])|制造(?![商者])|(?<![A-Za-z])(?:MFG\\.?\\s?(?:DATE)?|MFD|PRD|PROD(?:UCTION)?\\.?\\s?DATE|DOM|P\\.?D)(?![A-Za-z]))'
   '|(?<gen>保质期|保質期|保存期限|保存期|有效期限|有效期|賞味期間|SHELF\\s?LIFE)',
@@ -330,6 +340,20 @@ ExpiryParse parseExpiry(List<OcrLine> rawLines, {DateTime? now}) {
           expiry = hit.asExpiry();
           genericExpiry = label.kind == _LabelKind.generic;
         }
+    }
+  }
+
+  // "请于2027年3月15日前食用" / "2027.03.15之前使用": a date followed by 前/止
+  // is an expiry date even without a label.
+  if (expiry == null) {
+    for (final h in dates) {
+      if (h.used) continue;
+      final after = text.substring(h.end, h.end + 4 > text.length ? text.length : h.end + 4);
+      if (_beforeMarker.hasMatch(after)) {
+        h.used = true;
+        expiry = h.asExpiry();
+        break;
+      }
     }
   }
 

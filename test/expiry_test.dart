@@ -131,6 +131,54 @@ void main() {
     });
   });
 
+  group('packages with only an expiry date', () {
+    final cases = {
+      '保质期至 2027.03.15': DateTime(2027, 3, 15),
+      '保质期截止：2027年3月15日': DateTime(2027, 3, 15),
+      '有效期截止日期 2027-03-15': DateTime(2027, 3, 15),
+      '到期时间 20270315': DateTime(2027, 3, 15),
+      '最佳食用日期 2027/03/15': DateTime(2027, 3, 15),
+      '赏味期限 2027.03.15': DateTime(2027, 3, 15),
+      '使用期限 2027.03': DateTime(2027, 3, 31),
+      '失效期 2027.03.15': DateTime(2027, 3, 15),
+      'BEST BY 15/03/2027': DateTime(2027, 3, 15),
+      'BBD 2027.03.15': DateTime(2027, 3, 15),
+      'Expires 03/2027': DateTime(2027, 3, 31),
+      'EXP 03/2027': DateTime(2027, 3, 31),
+      'EXP 15.03.27': DateTime(2027, 3, 15),
+      '请于2027年3月15日前食用': DateTime(2027, 3, 15),
+      '2027.03.15之前使用': DateTime(2027, 3, 15),
+      '20270315': DateTime(2027, 3, 15),
+    };
+    for (final e in cases.entries) {
+      test(e.key, () {
+        final r = parse([e.key]);
+        expect(r.printedExpiry, e.value);
+        expect(r.productionDate, isNull);
+        expect(r.lastDay, e.value);
+      });
+    }
+
+    test('expiry label with an unrelated duration elsewhere stays expiry', () {
+      final r = parse(['有效期至 2027.03.15', '开封后请于3个月内用完', '适用于3个月以上']);
+      expect(r.printedExpiry, DateTime(2027, 3, 15));
+      expect(r.productionDate, isNull);
+    });
+
+    test('stray durations do not turn an expiry date into a production date', () {
+      for (final line in ['保质期截止 2027.03.15', '请于2027年3月15日前食用', '赏味期限 2027.03.15', '失效期 2027.03.15']) {
+        final r = parse([line, '适用于3个月以上宝宝']);
+        expect(r.printedExpiry, DateTime(2027, 3, 15), reason: line);
+        expect(r.productionDate, isNull, reason: line);
+      }
+    });
+
+    test('a future date next to the generic label is expiry when no shelf life is printed', () {
+      final r = parse(['保质期 2027.03.15']);
+      expect(r.printedExpiry, DateTime(2027, 3, 15));
+    });
+  });
+
   group('product name guess', () {
     test('uses a 品名 label when present', () {
       expect(parse(['品名：柔软抽纸', '生产日期 2025.01.01']).name, '柔软抽纸');
