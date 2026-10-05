@@ -58,6 +58,9 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  sqflite_common_ffi: 2.3.6
+  # FFI 2.3.6 uses sqlite3/open.dart, removed in sqlite3 3.x.
+  sqlite3: 2.9.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

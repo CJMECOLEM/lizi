@@ -16,12 +16,12 @@ class AppDatabase {
   static Future<Database> open() => _db ??= _openDefault();
 
   static Future<Database> _openDefault() async => openAppDatabase(
-        databaseFactory,
-        p.join(await getDatabasesPath(), 'history.db'),
-      );
+    databaseFactory,
+    p.join(await getDatabasesPath(), 'history.db'),
+  );
 }
 
-const schemaVersion = 3;
+const schemaVersion = 4;
 
 Future<Database> openAppDatabase(DatabaseFactory factory, String path) =>
     factory.openDatabase(
@@ -32,17 +32,21 @@ Future<Database> openAppDatabase(DatabaseFactory factory, String path) =>
           await _createV1(db);
           await _upgradeToV2(db);
           await _upgradeToV3(db);
+          await _upgradeToV4(db);
         },
         onUpgrade: (db, oldVersion, _) async {
           if (oldVersion < 2) await _upgradeToV2(db);
           if (oldVersion < 3) await _upgradeToV3(db);
+          if (oldVersion < 4) await _upgradeToV4(db);
         },
       ),
     );
 
 /// Shelf-life checks. Dates are stored as `yyyy-MM-dd` so they sort as text.
 Future<void> _upgradeToV3(Database db) async {
-  await db.execute("ALTER TABLE products ADD COLUMN shelf_life TEXT NOT NULL DEFAULT ''");
+  await db.execute(
+    "ALTER TABLE products ADD COLUMN shelf_life TEXT NOT NULL DEFAULT ''",
+  );
   await db.execute('''
     CREATE TABLE expiry_items(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,6 +63,15 @@ Future<void> _upgradeToV3(Database db) async {
   ''');
   await db.execute('CREATE INDEX idx_expiry_date ON expiry_items(expiry_date)');
   await db.execute('CREATE INDEX idx_expiry_barcode ON expiry_items(barcode)');
+}
+
+Future<void> _upgradeToV4(Database db) async {
+  await db.execute(
+    'ALTER TABLE expiry_items ADD COLUMN qty INTEGER NOT NULL DEFAULT 1 CHECK(qty >= 0)',
+  );
+  await db.execute(
+    "ALTER TABLE expiry_items ADD COLUMN unit TEXT NOT NULL DEFAULT '件'",
+  );
 }
 
 Future<void> _createV1(Database db) async {
@@ -136,8 +149,12 @@ Future<void> _upgradeToV2(Database db) async {
       at INTEGER NOT NULL
     )
   ''');
-  await db.execute('CREATE INDEX idx_items_sheet ON sheet_items(sheet_id, last_seen)');
-  await db.execute('CREATE INDEX idx_events_sheet ON sheet_events(sheet_id, id)');
+  await db.execute(
+    'CREATE INDEX idx_items_sheet ON sheet_items(sheet_id, last_seen)',
+  );
+  await db.execute(
+    'CREATE INDEX idx_events_sheet ON sheet_events(sheet_id, id)',
+  );
   await db.execute('CREATE INDEX idx_products_name ON products(name)');
   await _migrateBarcodeHistory(db);
 }
@@ -145,7 +162,11 @@ Future<void> _upgradeToV2(Database db) async {
 /// Copies version-1 barcode history into a "旧版记录" sheet so earlier counts
 /// stay visible. The original rows are left in place.
 Future<void> _migrateBarcodeHistory(Database db) async {
-  final rows = await db.query('records', where: 'type = ?', whereArgs: ['barcode']);
+  final rows = await db.query(
+    'records',
+    where: 'type = ?',
+    whereArgs: ['barcode'],
+  );
   if (rows.isEmpty) return;
 
   final merged = <String, Map<String, Object?>>{};

@@ -51,6 +51,7 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
   int _saved = 0;
   String _lastCode = '';
   DateTime _lastCodeAt = DateTime(2000);
+  String? _blockedGs1Code;
 
   @override
   void dispose() {
@@ -67,7 +68,9 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
   void _setResult(_Result r) {
     if (!mounted) return;
     final old = _result;
-    if (old?.draft != null && !identical(old?.draft, r.draft)) _discardDraftPhoto(old);
+    if (old?.draft != null && !identical(old?.draft, r.draft)) {
+      _discardDraftPhoto(old);
+    }
     setState(() => _result = r);
   }
 
@@ -75,9 +78,13 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
     if (_photoStep || _busy || _editing) return;
     final scan = scans.first;
     final code = scan.key;
+    if (code == _blockedGs1Code) return;
     final now = DateTime.now();
     // The code stays in view for a moment after it was handled.
-    if (code == _lastCode && now.difference(_lastCodeAt) < const Duration(seconds: 3)) return;
+    if (code == _lastCode &&
+        now.difference(_lastCodeAt) < const Duration(seconds: 3)) {
+      return;
+    }
     _lastCode = code;
     _lastCodeAt = now;
     _busy = true;
@@ -93,23 +100,30 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
           name: product?.name ?? '',
           productionDate: gs1?.productionDate,
           shelfLife: product?.shelfLife,
+          unit: product?.unit ?? defaultUnit,
           expiryDate: printed,
           createdAt: now,
           updatedAt: now,
         );
         final r = await ExpiryDb.instance.add(item);
+        // GS1 can save without a shutter press. Holding a code in view must
+        // not keep adding stock; the same code is rearmed explicitly.
+        _blockedGs1Code = code;
         ScanFeedback.instance.counted();
-        _saved += r.existed ? 0 : 1;
+        _saved++;
         _setResult(_Result(item: r.item, existed: r.existed));
         return;
       }
       ScanFeedback.instance.counted();
+      _blockedGs1Code = null;
       if (!mounted) return;
       setState(() {
         _barcode = code;
         _product = product;
         _photoStep = true;
       });
+    } catch (_) {
+      _setResult(const _Result(error: '读取或保存失败，请重试'));
     } finally {
       _busy = false;
     }
@@ -137,15 +151,22 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
       final parse = parseExpiry(lines);
       final photo = await PhotoStore.keep(temp);
       temp = null;
-      final product = _product;
+      final product =
+          _product ??
+          (_barcode.isEmpty && parse.name != null
+              ? await ExpiryDb.instance.rememberedByName(parse.name!)
+              : null);
       final draft = ExpiryDraft(
         barcode: _barcode,
-        name: product != null && product.name.isNotEmpty ? product.name : (parse.name ?? ''),
+        name: product != null && product.name.isNotEmpty
+            ? product.name
+            : (parse.name ?? ''),
         productionDate: parse.productionDate,
         shelfLife: parse.shelfLife ?? product?.shelfLife,
         printedExpiry: parse.printedExpiry,
         photo: photo,
         lines: parse.lines,
+        unit: product?.unit ?? defaultUnit,
       );
       final item = draft.toItem();
       if (item == null) {
@@ -153,10 +174,19 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
         _setResult(_Result(draft: draft));
       } else {
         final r = await ExpiryDb.instance.add(item);
-        if (r.existed) await PhotoStore.delete(photo);
-        if (parse.shelfLife != null) await ProductDb.instance.remember(_barcode, shelfLife: parse.shelfLife);
+        if (r.existed && photo != r.item.photo) await PhotoStore.delete(photo);
+        try {
+          await ProductDb.instance.remember(
+            r.item.barcode,
+            name: r.item.name,
+            shelfLife: r.item.shelfLife,
+            unit: r.item.unit,
+          );
+        } catch (_) {
+          // Stock is already saved; a defaults failure must not invite a retry.
+        }
         ScanFeedback.instance.counted();
-        _saved += r.existed ? 0 : 1;
+        _saved++;
         _setResult(_Result(item: r.item, existed: r.existed));
       }
       if (mounted) _toBarcodeStep();
@@ -171,7 +201,7 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
 
   Future<void> _openResult() async {
     final r = _result;
-    if (r == null || r.error != null) return;
+    if (_busy || _editing || r == null || r.error != null) return;
     final draft = r.item != null ? ExpiryDraft.of(r.item!) : r.draft!;
     // Closing the camera while editing keeps it from scanning in the
     // background and turns the torch off.
@@ -202,13 +232,20 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
                 const BackButton(color: Colors.white),
                 Expanded(
                   child: Text(
-                    _photoStep ? (_scanBarcode ? '② 拍生产日期 / 保质期' : '拍生产日期 / 保质期') : '① 扫商品条码',
-                    style: theme.textTheme.titleMedium?.copyWith(color: Colors.white),
+                    _photoStep
+                        ? (_scanBarcode ? '② 拍生产日期 / 保质期' : '拍生产日期 / 保质期')
+                        : '① 扫商品条码',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                    ),
                   ),
                 ),
                 Padding(
                   padding: const EdgeInsets.only(right: 16),
-                  child: Text('本次 $_saved 条', style: const TextStyle(color: Colors.white70)),
+                  child: Text(
+                    '已入库 $_saved 次',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
                 ),
               ],
             ),
@@ -223,7 +260,11 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
   Widget _camera() {
     if (_editing) return const ColoredBox(color: Colors.black);
     if (!_photoStep) {
-      return BarcodeCameraView(key: const ValueKey('barcode'), onDetect: _onBarcode, hint: '将商品条码放入框内');
+      return BarcodeCameraView(
+        key: const ValueKey('barcode'),
+        onDetect: _onBarcode,
+        hint: '将商品条码放入框内',
+      );
     }
     return Stack(
       fit: StackFit.expand,
@@ -275,7 +316,9 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
                           onPressed: _busy ? null : _toBarcodeStep,
                           icon: const Icon(Icons.qr_code_scanner),
                           label: const Text('重扫条码'),
-                          style: TextButton.styleFrom(foregroundColor: Colors.white),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                          ),
                         )
                       : const SizedBox.shrink(),
                 ),
@@ -283,17 +326,30 @@ class _ExpiryCapturePageState extends State<ExpiryCapturePage> {
                 const Expanded(child: SizedBox.shrink()),
               ],
             ),
-          ] else
+          ] else ...[
+            if (_blockedGs1Code != null)
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => setState(() {
+                        _blockedGs1Code = null;
+                        _lastCodeAt = DateTime(2000);
+                      }),
+                child: const Text('继续扫同一条码（下一件）'),
+              ),
             TextButton.icon(
-              onPressed: () => setState(() {
-                _barcode = '';
-                _product = null;
-                _photoStep = true;
-              }),
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                      _barcode = '';
+                      _product = null;
+                      _photoStep = true;
+                    }),
               icon: const Icon(Icons.photo_camera_outlined),
               label: const Text('没有条码，直接拍照'),
               style: TextButton.styleFrom(foregroundColor: Colors.white),
             ),
+          ],
         ],
       ),
     );
@@ -347,11 +403,16 @@ class _ResultBar extends StatelessWidget {
       detail = result.error!;
     } else if (item != null) {
       final style = ExpiryStyle.of(item.levelAt(DateTime.now()), scheme);
-      bg = item.levelAt(DateTime.now()) == ExpiryLevel.ok ? const Color(0xFF1B5E20) : style.background;
-      fg = item.levelAt(DateTime.now()) == ExpiryLevel.ok ? Colors.white : style.foreground;
+      bg = item.levelAt(DateTime.now()) == ExpiryLevel.ok
+          ? const Color(0xFF1B5E20)
+          : style.background;
+      fg = item.levelAt(DateTime.now()) == ExpiryLevel.ok
+          ? Colors.white
+          : style.foreground;
       title = item.title;
       detail = [
-        if (result.existed) '已在清单中',
+        if (result.existed) '同批次已加 1',
+        '库存 ${item.quantityLabel}',
         '${formatDate(item.expiryDate)} 到期',
         remainingLabel(item.expiryDate, DateTime.now()),
       ].join(' · ');
@@ -359,7 +420,9 @@ class _ResultBar extends StatelessWidget {
       final d = result.draft!;
       bg = const Color(0xFF4E342E);
       fg = Colors.white;
-      title = d.name.isNotEmpty ? d.name : (d.barcode.isNotEmpty ? d.barcode : '这张照片');
+      title = d.name.isNotEmpty
+          ? d.name
+          : (d.barcode.isNotEmpty ? d.barcode : '这张照片');
       detail = d.lines.isEmpty ? '没识别到文字，点此手动填写' : '没认出完整的日期，点此补填';
     }
     return Material(
@@ -376,12 +439,23 @@ class _ResultBar extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 16)),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: fg,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg)),
+                    Text(
+                      detail,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: fg),
+                    ),
                   ],
                 ),
               ),

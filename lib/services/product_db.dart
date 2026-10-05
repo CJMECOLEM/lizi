@@ -16,20 +16,37 @@ class ProductDb extends ChangeNotifier {
   Future<Product?> get(String barcode) async {
     if (barcode.isEmpty) return null;
     final db = await _open();
-    final rows = await db.query('products', where: 'barcode = ?', whereArgs: [barcode]);
+    final rows = await db.query(
+      'products',
+      where: 'barcode = ?',
+      whereArgs: [barcode],
+    );
     return rows.isEmpty ? null : Product.fromMap(rows.first);
   }
 
   /// Stores the non-empty values given; empty ones keep what was there.
-  Future<void> remember(String barcode, {String name = '', ShelfLife? shelfLife}) async {
-    if (barcode.isEmpty || (name.isEmpty && shelfLife == null)) return;
+  Future<void> remember(
+    String barcode, {
+    String name = '',
+    ShelfLife? shelfLife,
+    String unit = '',
+  }) async {
+    if (barcode.isEmpty || (name.isEmpty && shelfLife == null && unit.isEmpty)) {
+      return;
+    }
     final db = await _open();
     final values = {
       if (name.isNotEmpty) 'name': name,
       if (shelfLife != null) 'shelf_life': shelfLife.code,
+      if (unit.isNotEmpty) 'unit': stockUnit(unit),
       'updated_at': DateTime.now().millisecondsSinceEpoch,
     };
-    final n = await db.update('products', values, where: 'barcode = ?', whereArgs: [barcode]);
+    final n = await db.update(
+      'products',
+      values,
+      where: 'barcode = ?',
+      whereArgs: [barcode],
+    );
     if (n == 0) await db.insert('products', {'barcode': barcode, ...values});
     notifyListeners();
   }

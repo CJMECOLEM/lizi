@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../expiry/expiry_math.dart';
 import '../models/expiry_item.dart';
+import '../models/product.dart';
 import '../services/expiry_db.dart';
 import '../services/photo_store.dart';
 import '../services/product_db.dart';
@@ -23,6 +24,8 @@ class ExpiryDraft {
     this.printedExpiry,
     this.photo = '',
     this.lines = const [],
+    this.qty = 1,
+    this.unit = defaultUnit,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
@@ -40,6 +43,8 @@ class ExpiryDraft {
       photo: it.photo,
       lines: it.ocrText.isEmpty ? const [] : it.ocrText.split('\n'),
       createdAt: it.createdAt,
+      qty: it.qty,
+      unit: it.unit,
     );
   }
 
@@ -55,10 +60,14 @@ class ExpiryDraft {
   final String photo;
   final List<String> lines;
   final DateTime createdAt;
+  final int qty;
+  final String unit;
 
   DateTime? get lastDay =>
       printedExpiry ??
-      (productionDate != null && shelfLife != null ? shelfLife!.lastDayFrom(productionDate!) : null);
+      (productionDate != null && shelfLife != null
+          ? shelfLife!.lastDayFrom(productionDate!)
+          : null);
 
   ExpiryItem? toItem() {
     final last = lastDay;
@@ -74,6 +83,8 @@ class ExpiryDraft {
       ocrText: lines.join('\n'),
       createdAt: createdAt,
       updatedAt: DateTime.now(),
+      qty: qty,
+      unit: stockUnit(unit),
     );
   }
 }
@@ -82,7 +93,10 @@ typedef ExpiryEditResult = ({ExpiryItem? saved, bool deleted});
 
 Future<ExpiryEditResult?> editExpiry(BuildContext context, ExpiryDraft draft) =>
     Navigator.of(context).push<ExpiryEditResult>(
-      MaterialPageRoute(fullscreenDialog: true, builder: (_) => ExpiryEditPage(draft: draft)),
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => ExpiryEditPage(draft: draft),
+      ),
     );
 
 class ExpiryEditPage extends StatefulWidget {
@@ -96,8 +110,14 @@ class ExpiryEditPage extends StatefulWidget {
 class _ExpiryEditPageState extends State<ExpiryEditPage> {
   late final _name = TextEditingController(text: widget.draft.name);
   late final _barcode = TextEditingController(text: widget.draft.barcode);
-  late final _shelfValue = TextEditingController(text: widget.draft.shelfLife?.value.toString() ?? '');
-  late ShelfLifeUnit _shelfUnit = widget.draft.shelfLife?.unit ?? ShelfLifeUnit.month;
+  late final _quantity = TextEditingController(text: '${widget.draft.qty}');
+  late final _unit = TextEditingController(text: widget.draft.unit);
+  bool _unitEdited = false;
+  late final _shelfValue = TextEditingController(
+    text: widget.draft.shelfLife?.value.toString() ?? '',
+  );
+  late ShelfLifeUnit _shelfUnit =
+      widget.draft.shelfLife?.unit ?? ShelfLifeUnit.month;
   late DateTime? _production = widget.draft.productionDate;
   late DateTime? _manualExpiry = widget.draft.printedExpiry;
   bool _saving = false;
@@ -106,6 +126,8 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
   void dispose() {
     _name.dispose();
     _barcode.dispose();
+    _quantity.dispose();
+    _unit.dispose();
     _shelfValue.dispose();
     super.dispose();
   }
@@ -124,55 +146,99 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
   DateTime? get _lastDay => _manualExpiry ?? _computed;
 
   Future<DateTime?> _pickDate(DateTime? initial) => showDatePicker(
-        context: context,
-        initialDate: initial ?? DateTime.now(),
-        firstDate: DateTime(2000),
-        lastDate: DateTime(2100),
-      );
+    context: context,
+    initialDate: initial ?? DateTime.now(),
+    firstDate: DateTime(2000),
+    lastDate: DateTime(2100),
+  );
 
   Future<void> _save() async {
+    if (_saving) return;
     final d = widget.draft;
-    final draft = ExpiryDraft(
-      id: d.id,
-      barcode: _barcode.text.trim(),
-      name: _name.text.trim(),
-      productionDate: _production,
-      shelfLife: _shelf,
-      printedExpiry: _manualExpiry,
-      photo: d.photo,
-      lines: d.lines,
-      createdAt: d.createdAt,
-    );
-    final item = draft.toItem();
-    if (item == null) {
-      showToast(context, '请填写到期日，或者生产日期和保质期');
+    final qty = int.tryParse(_quantity.text);
+    if (qty == null || qty < (d.id == null ? 1 : 0) || qty > 2147483647) {
+      showToast(context, d.id == null ? '入库数量须为正整数' : '库存数量须为非负整数');
       return;
     }
     setState(() => _saving = true);
-    var saved = item;
-    if (item.id == null) {
-      final r = await ExpiryDb.instance.add(item);
-      saved = r.item;
-      if (r.existed) {
-        // Same batch already listed: keep its photo, take the entered details.
-        saved = item.copyWith(id: r.item.id, photo: r.item.photo.isNotEmpty ? r.item.photo : item.photo);
-        await ExpiryDb.instance.update(saved);
-        if (item.photo.isNotEmpty && item.photo != saved.photo) await PhotoStore.delete(item.photo);
+    try {
+      var unit = stockUnit(_unit.text);
+      if (d.id == null && !_unitEdited) {
+        final remembered = _barcode.text.trim().isNotEmpty
+            ? await ProductDb.instance.get(_barcode.text.trim())
+            : await ExpiryDb.instance.rememberedByName(_name.text.trim());
+        unit = remembered?.unit ?? unit;
       }
-    } else {
-      await ExpiryDb.instance.update(item);
+      if (!mounted) return;
+      final draft = ExpiryDraft(
+        id: d.id,
+        barcode: _barcode.text.trim(),
+        name: _name.text.trim(),
+        productionDate: _production,
+        shelfLife: _shelf,
+        printedExpiry: _manualExpiry,
+        photo: d.photo,
+        lines: d.lines,
+        createdAt: d.createdAt,
+        qty: qty,
+        unit: unit,
+      );
+      final item = draft.toItem();
+      if (item == null) {
+        if (mounted) showToast(context, '请填写到期日，或者生产日期和保质期');
+        return;
+      }
+      var saved = item;
+      if (item.id == null) {
+        final r = await ExpiryDb.instance.add(item);
+        saved = r.item;
+        if (r.existed) {
+          if (item.photo.isNotEmpty && item.photo != saved.photo) {
+            await PhotoStore.delete(item.photo);
+          }
+        }
+      } else {
+        await ExpiryDb.instance.update(item);
+      }
+      try {
+        await ProductDb.instance.remember(
+          saved.barcode,
+          name: saved.name,
+          shelfLife: saved.shelfLife,
+          unit: saved.unit,
+        );
+      } catch (_) {
+        if (mounted) showToast(context, '已保存批次，但商品默认参数未能更新');
+      }
+      if (mounted) {
+        Navigator.pop<ExpiryEditResult>(context, (
+          saved: saved,
+          deleted: false,
+        ));
+      }
+    } catch (e) {
+      if (mounted) showToast(context, '保存失败：$e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
-    await ProductDb.instance.remember(item.barcode, name: item.name, shelfLife: item.shelfLife);
-    if (mounted) Navigator.pop<ExpiryEditResult>(context, (saved: saved, deleted: false));
   }
 
   Future<void> _delete() async {
     final id = widget.draft.id;
     if (id == null) return;
-    if (!await confirm(context, title: '删除这条记录？', ok: '删除', destructive: true)) return;
+    if (!await confirm(
+      context,
+      title: '删除这条记录？',
+      ok: '删除',
+      destructive: true,
+    )) {
+      return;
+    }
     await ExpiryDb.instance.delete(id);
     await PhotoStore.delete(widget.draft.photo);
-    if (mounted) Navigator.pop<ExpiryEditResult>(context, (saved: null, deleted: true));
+    if (mounted) {
+      Navigator.pop<ExpiryEditResult>(context, (saved: null, deleted: true));
+    }
   }
 
   @override
@@ -181,14 +247,24 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
     final d = widget.draft;
     final last = _lastDay;
     final now = DateTime.now();
-    final nameChoices = d.lines.where((l) => l.length >= 2 && l.length <= 30).take(40).toList();
+    final nameChoices = d.lines
+        .where((l) => l.length >= 2 && l.length <= 30)
+        .take(40)
+        .toList();
     return Scaffold(
       appBar: AppBar(
         title: Text(d.id == null ? '补填保质期' : '修改保质期'),
         actions: [
           if (d.id != null)
-            IconButton(icon: const Icon(Icons.delete_outline), tooltip: '删除', onPressed: _saving ? null : _delete),
-          TextButton(onPressed: _saving ? null : _save, child: const Text('保存')),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: '删除',
+              onPressed: _saving ? null : _delete,
+            ),
+          TextButton(
+            onPressed: _saving ? null : _save,
+            child: const Text('保存'),
+          ),
         ],
       ),
       body: ListView(
@@ -202,14 +278,22 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
                 onTap: () => _showPhoto(context, d.photo),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.file(File(d.photo), height: 180, fit: BoxFit.cover, cacheWidth: 800),
+                  child: Image.file(
+                    File(d.photo),
+                    height: 180,
+                    fit: BoxFit.cover,
+                    cacheWidth: 800,
+                  ),
                 ),
               ),
             ),
           const SizedBox(height: 16),
           TextField(
             controller: _name,
-            decoration: const InputDecoration(labelText: '商品名称', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: '商品名称',
+              border: OutlineInputBorder(),
+            ),
           ),
           if (nameChoices.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -229,19 +313,55 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
             ),
           ],
           const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _quantity,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: InputDecoration(
+                    labelText: d.id == null ? '本次入库数量' : '批次库存数量',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _unit,
+                  onChanged: (_) => _unitEdited = true,
+                  decoration: const InputDecoration(
+                    labelText: '单位',
+                    hintText: '件 / 盒 / 瓶',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           TextField(
             controller: _barcode,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: '条码（可不填）', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: '条码（可不填）',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 8),
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('生产日期'),
-            subtitle: Text(_production == null ? '未填' : formatDate(_production!)),
+            subtitle: Text(
+              _production == null ? '未填' : formatDate(_production!),
+            ),
             trailing: _production == null
                 ? const Icon(Icons.edit_calendar)
-                : IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _production = null)),
+                : IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () => setState(() => _production = null),
+                  ),
             onTap: () async {
               final v = await _pickDate(_production);
               if (v != null) setState(() => _production = v);
@@ -255,7 +375,10 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
                   controller: _shelfValue,
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(labelText: '保质期', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    labelText: '保质期',
+                    border: OutlineInputBorder(),
+                  ),
                   onChanged: (_) => setState(() {}),
                 ),
               ),
@@ -263,11 +386,13 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
               Expanded(
                 child: SegmentedButton<ShelfLifeUnit>(
                   segments: [
-                    for (final u in ShelfLifeUnit.values) ButtonSegment(value: u, label: Text(u.label)),
+                    for (final u in ShelfLifeUnit.values)
+                      ButtonSegment(value: u, label: Text(u.label)),
                   ],
                   selected: {_shelfUnit},
                   showSelectedIcon: false,
-                  onSelectionChanged: (s) => setState(() => _shelfUnit = s.first),
+                  onSelectionChanged: (s) =>
+                      setState(() => _shelfUnit = s.first),
                 ),
               ),
             ],
@@ -287,7 +412,9 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
               if (v != null) setState(() => _manualExpiry = v);
             },
           ),
-          if (_manualExpiry != null && _computed != null && _computed != _manualExpiry)
+          if (_manualExpiry != null &&
+              _computed != null &&
+              _computed != _manualExpiry)
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton(
@@ -301,13 +428,21 @@ class _ExpiryEditPageState extends State<ExpiryEditPage> {
   }
 
   void _showPhoto(BuildContext context, String path) {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
-        body: InteractiveViewer(maxScale: 6, child: Center(child: Image.file(File(path)))),
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+          ),
+          body: InteractiveViewer(
+            maxScale: 6,
+            child: Center(child: Image.file(File(path))),
+          ),
+        ),
       ),
-    ));
+    );
   }
 }
 
@@ -318,7 +453,10 @@ class _Preview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = ExpiryStyle.of(expiryLevel(lastDay, now), Theme.of(context).colorScheme);
+    final style = ExpiryStyle.of(
+      expiryLevel(lastDay, now),
+      Theme.of(context).colorScheme,
+    );
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -328,7 +466,11 @@ class _Preview extends StatelessWidget {
       ),
       child: Text(
         '${formatDate(lastDay)} 到期 · ${remainingLabel(lastDay, now)}',
-        style: TextStyle(color: style.foreground, fontSize: 16, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: style.foreground,
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
