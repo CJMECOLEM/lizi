@@ -73,7 +73,7 @@ class _HistoryPageState extends State<HistoryPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('清空历史记录？'),
+        title: const Text('清空识字记录？'),
         content: const Text('所有记录将被删除，无法恢复。'),
         actions: [
           TextButton(
@@ -140,7 +140,7 @@ class _HistoryPageState extends State<HistoryPage> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('历史记录'),
+        title: const Text('识字记录'),
         actions: [
           PopupMenuButton<ExportFormat>(
             icon: const Icon(Icons.file_download_outlined),

@@ -33,6 +33,19 @@ class OccurrenceTracker {
     return counted;
   }
 
+  /// Treats [keys] as counted and seen at [now], so they are not counted
+  /// again until they leave the frame. Used after scanning was paused (e.g.
+  /// while a quantity dialog was open) and the frames in between were ignored.
+  void markCounted(Iterable<String> keys, DateTime now) {
+    for (final key in keys) {
+      final track = _tracks.putIfAbsent(key, () => _Track(now));
+      track
+        ..lastSeen = now
+        ..hits = confirmFrames
+        ..counted = true;
+    }
+  }
+
   void reset() => _tracks.clear();
 }
 

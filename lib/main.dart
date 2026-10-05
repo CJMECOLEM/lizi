@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'pages/history_page.dart';
-import 'pages/scan_page.dart';
+import 'pages/count_page.dart';
+import 'pages/expiry_list_page.dart';
 import 'pages/settings_page.dart';
 import 'services/app_settings.dart';
 
@@ -20,7 +20,7 @@ class ScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '扫码识字',
+      title: '保质期检查',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
       darkTheme: ThemeData(
@@ -51,18 +51,18 @@ class _HomeShellState extends State<HomeShell> {
     return Scaffold(
       body: IndexedStack(
         index: _index,
-        children: [
-          ScanPage(active: _index == 0),
-          const HistoryPage(),
-          const SettingsPage(),
+        children: const [
+          ExpiryListPage(),
+          CountPage(),
+          SettingsPage(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.qr_code_scanner), label: '扫描'),
-          NavigationDestination(icon: Icon(Icons.history), label: '历史'),
+          NavigationDestination(icon: Icon(Icons.event_available_outlined), label: '保质期'),
+          NavigationDestination(icon: Icon(Icons.qr_code_scanner), label: '计数'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), label: '设置'),
         ],
       ),

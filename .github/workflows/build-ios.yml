@@ -29,6 +29,18 @@ jobs:
       - name: Build iOS app without code signing
         run: flutter build ios --release --no-codesign
 
+      - name: Check the Chinese text model is linked
+        run: |
+          BIN=build/ios/iphoneos/Runner.app/Frameworks/google_mlkit_text_recognition.framework/google_mlkit_text_recognition
+          if [ ! -f "$BIN" ]; then
+            BIN=build/ios/iphoneos/Runner.app/Runner
+          fi
+          if nm "$BIN" 2>/dev/null | grep -q ChineseTextRecognizerOptions; then
+            echo "Chinese text recognizer is linked."
+          else
+            echo "::warning::Chinese text recognizer is NOT linked; iOS will only read Latin text."
+          fi
+
       # Sideloadly signs the IPA with your Apple ID during installation.
       - name: Package unsigned IPA
         run: |

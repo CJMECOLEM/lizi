@@ -1,9 +1,7 @@
-import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lizi/models/scan_record.dart';
-import 'package:lizi/scan/auto_torch.dart';
 import 'package:lizi/scan/occurrence_tracker.dart';
 import 'package:lizi/scan/text_filter.dart';
 import 'package:lizi/scan/viewfinder.dart';
@@ -46,55 +44,6 @@ void main() {
       expect(t.update(['A'], at(200)), ['A']);
       expect(t.update(['A'], at(2000)), isEmpty);
     });
-  });
-
-  group('AutoTorchController', () {
-    test('turns on after sustained darkness', () {
-      final c = AutoTorchController(darkFor: const Duration(seconds: 1));
-      bool step(int ms, double luma) =>
-          c.shouldTurnOn(luma: luma, now: at(ms), torchOn: false, enabled: true);
-      expect(step(0, 10), isFalse);
-      expect(step(500, 10), isFalse);
-      expect(step(1000, 10), isTrue);
-    });
-
-    test('a bright frame restarts the timer', () {
-      final c = AutoTorchController(darkFor: const Duration(seconds: 1));
-      bool step(int ms, double luma) =>
-          c.shouldTurnOn(luma: luma, now: at(ms), torchOn: false, enabled: true);
-      step(0, 10);
-      step(600, 120);
-      expect(step(1200, 10), isFalse);
-      expect(step(2200, 10), isTrue);
-    });
-
-    test('stays quiet after manual off until reset, and when disabled', () {
-      final c = AutoTorchController(darkFor: Duration.zero);
-      c.userTurnedOff();
-      expect(c.shouldTurnOn(luma: 0, now: at(0), torchOn: false, enabled: true), isFalse);
-      c.reset();
-      expect(c.shouldTurnOn(luma: 0, now: at(0), torchOn: false, enabled: false), isFalse);
-      expect(c.shouldTurnOn(luma: 0, now: at(0), torchOn: false, enabled: true), isTrue);
-    });
-  });
-
-  test('averageLuma reads luma and BGRA frames', () {
-    final y = Uint8List(100 * 50)..fillRange(0, 100 * 50, 80);
-    expect(
-      averageLuma(bytes: y, width: 100, height: 50, bytesPerRow: 100, bgra: false),
-      closeTo(80, 0.01),
-    );
-    final bgra = Uint8List(10 * 10 * 4);
-    for (var i = 0; i < bgra.length; i += 4) {
-      bgra[i] = 255; // B
-      bgra[i + 1] = 255; // G
-      bgra[i + 2] = 255; // R
-      bgra[i + 3] = 255;
-    }
-    expect(
-      averageLuma(bytes: bgra, width: 10, height: 10, bytesPerRow: 40, bgra: true),
-      closeTo(255, 0.5),
-    );
   });
 
   group('viewfinder mapping', () {

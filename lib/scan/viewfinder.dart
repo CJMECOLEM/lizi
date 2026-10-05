@@ -26,6 +26,15 @@ Rect screenRectToImage(Rect onScreen, Size screen, Size uprightImage) {
   );
 }
 
+/// Barcode scan window: wide enough for long 1D codes, tall enough for QR
+/// codes, centered slightly above the middle where the thumb does not cover.
+Rect barcodeViewfinderRect(Size screen) {
+  final width = screen.width * 0.8;
+  final height = math.min(width * 0.62, screen.height * 0.5);
+  final center = Offset(screen.width / 2, screen.height * 0.45);
+  return Rect.fromCenter(center: center, width: width, height: height);
+}
+
 /// Viewfinder used in text mode: a wide band slightly above center.
 Rect textViewfinderRect(Size screen) {
   final width = screen.width * 0.86;

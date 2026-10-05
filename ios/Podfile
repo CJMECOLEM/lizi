@@ -53,6 +53,17 @@ post_install do |installer|
       if Gem::Version.new($iOSVersion) > Gem::Version.new(config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'])
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = $iOSVersion
       end
+      # The plugin picks the Chinese recognizer with `#if canImport(...)`, but
+      # its pod target cannot see the Chinese framework added above, so it
+      # silently falls back to the Latin-only model. Make it visible and link it.
+      if target.name == 'google_mlkit_text_recognition'
+        config.build_settings['FRAMEWORK_SEARCH_PATHS'] = [
+          '$(inherited)',
+          '"${PODS_ROOT}/MLKitTextRecognitionChinese/Frameworks"',
+          '"${PODS_XCFRAMEWORKS_BUILD_DIR}/MLKitTextRecognitionChinese"',
+        ]
+        config.build_settings['OTHER_LDFLAGS'] = ['$(inherited)', '-framework', '"MLKitTextRecognitionChinese"']
+      end
     end
   end
 end

@@ -1,41 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../services/app_settings.dart';
-import '../services/history_db.dart';
+import 'history_page.dart';
+import 'text_scan_page.dart';
+
+const appVersion = '2.0.0';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
-  Future<void> _confirmClear(BuildContext context) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('清空历史记录？'),
-        content: const Text('所有记录将被删除，无法恢复。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('清空'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await HistoryDb.instance.clear();
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已清空'), behavior: SnackBarBehavior.floating),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final settings = AppSettings.instance;
+    void open(Widget page) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListenableBuilder(
@@ -43,25 +20,47 @@ class SettingsPage extends StatelessWidget {
         builder: (context, _) => ListView(
           children: [
             SwitchListTile(
-              title: const Text('暗处自动开闪光灯'),
-              subtitle: const Text('光线不足时自动打开；手动关闭后，本次扫描不再自动打开'),
-              value: settings.autoTorch,
-              onChanged: (v) => settings.autoTorch = v,
+              title: const Text('扫描时打开闪光灯'),
+              subtitle: const Text('相机打开时自动亮起，离开扫描界面或切到后台就关闭'),
+              value: settings.torchWhileScanning,
+              onChanged: (v) => settings.torchWhileScanning = v,
             ),
             SwitchListTile(
-              title: const Text('识别成功时震动'),
+              title: const Text('检查保质期前先扫条码'),
+              subtitle: const Text('用条码记住商品名称和保质期，下次同一商品只需拍生产日期'),
+              value: settings.expiryScanBarcode,
+              onChanged: (v) => settings.expiryScanBarcode = v,
+            ),
+            SwitchListTile(
+              title: const Text('提示音'),
+              value: settings.beep,
+              onChanged: (v) => settings.beep = v,
+            ),
+            SwitchListTile(
+              title: const Text('震动'),
               value: settings.vibrate,
               onChanged: (v) => settings.vibrate = v,
             ),
-            const Divider(),
-            ListTile(
-              title: const Text('清空历史记录', style: TextStyle(color: Colors.red)),
-              onTap: () => _confirmClear(context),
-            ),
             const ListTile(
-              title: Text('版本'),
-              trailing: Text('1.0.0'),
+              title: Text('到期提醒规则'),
+              subtitle: Text('按自然月计算：1 个月内到期标红，2 个月内标黄，已过期标灰。'
+                  '到期日是最后有效日，例如 2025-03-01 生产、保质期 12 个月，到期日为 2026-02-28。'),
             ),
+            const Divider(),
+            const ListTile(dense: true, title: Text('附加功能')),
+            ListTile(
+              leading: const Icon(Icons.text_fields),
+              title: const Text('连续识字'),
+              subtitle: const Text('对准文字自动识别并保存'),
+              onTap: () => open(const TextScanPage()),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history),
+              title: const Text('识字记录'),
+              onTap: () => open(const HistoryPage()),
+            ),
+            const Divider(),
+            const ListTile(title: Text('版本'), trailing: Text(appVersion)),
           ],
         ),
       ),
