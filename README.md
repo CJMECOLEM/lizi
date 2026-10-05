@@ -47,7 +47,7 @@ lib/
   scan/                相机组件（扫码、拍照、连续识字）和文字识别
   services/            本地数据库、设置、导出、照片、提示音
   models/ widgets/
-.github/workflows/     云端编译 Android APK 和 iOS 安装包
+.github/workflows/     云端编译 Android APK
 ```
 
 ## 本地开发（Windows）
@@ -58,28 +58,13 @@ flutter analyze
 flutter test
 ```
 
-本机没有安装 Android SDK 和 Xcode，安装包由 GitHub Actions 编译。
+本机没有安装 Android SDK，安装包由 GitHub Actions 编译。
 
 ## 编译安装包
 
-推送到 GitHub 的 `main` 分支后，会自动运行两个工作流，也可以在 Actions 页面手动运行：
+推送到 GitHub 的 `main` 分支后，会自动运行 Android 编译工作流，也可以在 Actions 页面手动运行：
 
 - **Build Android APK**：在运行详情页底部下载 `lizi-apk`，里面是 `lizi.apk`，传到安卓手机上安装即可。APK 用调试密钥签名，每次编译的签名可能不同，更新前需要先卸载旧版本（卸载会删除手机上的记录，请先导出）。
-- **Build iOS (unsigned IPA)**：下载 `lizi-unsigned-ipa`，用 Sideloadly 安装（见下文）。运行日志里有一步会检查中文识别模型是否打包进去了。
-
-> 私有仓库使用 macOS 运行环境会按 10 倍速度消耗免费额度。
-
-## 用 Sideloadly 安装到 iPhone
-
-1. 在 Windows 上安装 [Sideloadly](https://sideloadly.io/)，以及**从苹果官网下载**的 iTunes 和 iCloud（不要用 Microsoft Store 版本）。
-2. 用数据线连接 iPhone，在手机上点“信任此电脑”。
-3. 打开 Sideloadly，把 `lizi-unsigned.ipa` 拖进去，输入 Apple ID，然后点 Start。
-4. 在 iPhone 上：
-   - iOS 16 及以上：打开 **设置 › 隐私与安全性 › 开发者模式**，开启后重启手机。
-   - 打开 **设置 › 通用 › VPN 与设备管理**，信任对应的开发者。
-5. 打开“保质期检查”，允许访问相机。
-
-用免费 Apple ID 签名的应用 **7 天后失效**，需要重新安装一次，记录会保留。
 
 ## 下一版计划
 
